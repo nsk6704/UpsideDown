@@ -41,7 +41,7 @@ export class AudioManager {
     try {
       let response = await fetch(path);
       if (!response.ok) {
-        // Try .wav fallback
+        // Try .wav fallback if .mp3 fails
         const wavPath = path.replace('.mp3', '.wav');
         response = await fetch(wavPath);
         if (!response.ok) throw new Error(`Failed to load ${path} or ${wavPath}`);
@@ -52,7 +52,6 @@ export class AudioManager {
       console.log(`Loaded sound: ${name}`);
     } catch (error) {
       // Silent failure is fine, we fallback to procedural
-      // console.log(`Using procedural fallback for ${name}`);
     }
   }
 
