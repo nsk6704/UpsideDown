@@ -7,7 +7,7 @@ import { AudioManager } from './audio.js';
 import { LevelBuilder } from './level.js';
 import { GLTFLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js";
 
-console.log("🌴 Multi-Level Adventure Loading...");
+console.log("✨ Crystal Core Adventure Loading...");
 
 /* ===================== MANAGERS ===================== */
 const aiManager = new AIManager();
@@ -22,13 +22,15 @@ const gameState = {
   playing: false,
   startTime: 0,
   mapVisible: false,
-  currentLevel: 'jungle', // 'jungle' or 'subterranean'
+  settingsVisible: false,
+  currentLevel: 'jungle',
+  weather: 'clear', // 'clear', 'rain', 'dust'
   structures: []
 };
 
 /* ===================== SCENE ===================== */
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // Start with Jungle Sky
+scene.background = new THREE.Color(0x87CEEB);
 scene.fog = new THREE.FogExp2(0x1a331a, 0.02);
 
 /* ===================== CAMERA ===================== */
@@ -51,26 +53,24 @@ document.body.appendChild(VRButton.createButton(renderer));
 const controls = new PointerLockControls(camera, document.body);
 scene.add(controls.getObject());
 
-document.body.addEventListener("click", async () => {
+document.body.addEventListener("click", async (e) => {
+  // Ignore clicks on UI
+  if (e.target.closest('#settings-ui') || e.target.closest('#settings-btn')) return;
+
   if (!gameState.playing && !renderer.xr.isPresenting) {
     controls.lock();
     gameState.playing = true;
     gameState.startTime = Date.now();
-
     const startMsg = document.getElementById('start-message');
     if (startMsg) startMsg.remove();
-
     await audioManager.init();
-
     const intro = await aiManager.generateNarration(gameState, 'intro');
-    showMessage(intro || "Welcome to the Jungle. Explore and find the secrets.", 0xccffcc, 5000);
+    showMessage(intro || "Welcome to the Jungle. Find the Core Entrance.", 0xccffcc, 5000);
   }
 });
 
 controls.addEventListener('unlock', () => {
-  if (!gameState.gameWon) {
-    showMessage("Click to continue adventure", 0xffffff);
-  }
+  if (!gameState.gameWon && !gameState.mapVisible && !gameState.settingsVisible) showMessage("Click to continue", 0xffffff);
 });
 
 /* ===================== MOVEMENT ===================== */
@@ -86,6 +86,13 @@ document.addEventListener("keydown", e => {
   if (e.code === "ShiftLeft") move.sprint = true;
   if (e.code === "KeyM") toggleMap();
   if (e.code === "KeyT") interactNPC();
+  if (e.code === "KeyL") { // Debug
+    const next = gameState.currentLevel === 'jungle' ? 'crystal_core' : 'jungle';
+    loadLevel(next);
+  }
+  if (e.code === "Escape") {
+    if (gameState.settingsVisible) toggleSettings();
+  }
 });
 
 document.addEventListener("keyup", e => {
@@ -106,9 +113,72 @@ sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(2048, 2048);
 scene.add(sunLight);
 
-const lantern = new THREE.PointLight(0xffaa00, 0, 15); // Off initially
+const lantern = new THREE.PointLight(0xffaa00, 0, 30);
 lantern.position.copy(camera.position);
 scene.add(lantern);
+
+/* ===================== WEATHER SYSTEM ===================== */
+let weatherParticles = null;
+
+function setWeather(type) {
+  gameState.weather = type;
+  if (weatherParticles) {
+    scene.remove(weatherParticles);
+    weatherParticles = null;
+  }
+
+  if (type === 'clear') return;
+
+  const count = 2000;
+  const geometry = new THREE.BufferGeometry();
+  const positions = [];
+  const velocities = [];
+
+  for (let i = 0; i < count; i++) {
+    positions.push((Math.random() - 0.5) * 100, Math.random() * 50, (Math.random() - 0.5) * 100);
+    velocities.push(0, type === 'rain' ? -0.5 : -0.1, 0);
+  }
+
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.userData.velocities = velocities;
+
+  const color = type === 'rain' ? 0xaaaaaa : 0xffffff;
+  const size = type === 'rain' ? 0.2 : 0.1;
+  const opacity = type === 'rain' ? 0.6 : 0.8;
+
+  const material = new THREE.PointsMaterial({
+    color: color,
+    size: size,
+    transparent: true,
+    opacity: opacity,
+    blending: THREE.AdditiveBlending
+  });
+
+  weatherParticles = new THREE.Points(geometry, material);
+  scene.add(weatherParticles);
+}
+
+function updateWeather() {
+  if (!weatherParticles) return;
+  const positions = weatherParticles.geometry.attributes.position.array;
+  const velocities = weatherParticles.geometry.userData.velocities;
+
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i + 1] += velocities[i + 1]; // Y movement
+
+    // Reset if below ground
+    if (positions[i + 1] < 0) {
+      positions[i + 1] = 50;
+      positions[i] = camera.position.x + (Math.random() - 0.5) * 50;
+      positions[i + 2] = camera.position.z + (Math.random() - 0.5) * 50;
+    }
+  }
+  weatherParticles.geometry.attributes.position.needsUpdate = true;
+
+  // Follow player roughly
+  weatherParticles.position.x = camera.position.x;
+  weatherParticles.position.z = camera.position.z;
+}
 
 /* ===================== LEVEL SYSTEM ===================== */
 const levelBuilder = new LevelBuilder(scene);
@@ -120,54 +190,57 @@ function loadLevel(type) {
   treasures = [];
 
   if (type === 'jungle') {
-    // Visuals
     scene.background = new THREE.Color(0x87CEEB);
     scene.fog = new THREE.FogExp2(0x1a331a, 0.02);
-    ambientLight.color.setHex(0xffffff);
-    ambientLight.intensity = 0.6;
+    ambientLight.color.setHex(0xffffff); ambientLight.intensity = 0.6;
     sunLight.intensity = 1.2;
     lantern.intensity = 0;
 
-    // Build
     levelBuilder.buildJungle();
+    setWeather('rain'); // Default jungle weather
 
-    // Treasures
     createTreasure(10, 10, 'gold');
     createTreasure(-20, 20, 'gold');
 
-  } else if (type === 'subterranean') {
-    // Visuals
-    scene.background = new THREE.Color(0x050510);
-    scene.fog = new THREE.FogExp2(0x050510, 0.025);
-    ambientLight.color.setHex(0x442266);
-    ambientLight.intensity = 0.4;
-    sunLight.intensity = 0.2; // Dim core light
-    lantern.intensity = 1.5;
+  } else if (type === 'crystal_core') {
+    // Bright, Magical Atmosphere
+    scene.background = new THREE.Color(0xe0ffff); // Light Cyan
+    scene.fog = new THREE.FogExp2(0xe0ffff, 0.01); // Bright fog
 
-    // Build
-    levelBuilder.buildSubterranean();
+    ambientLight.color.setHex(0xffffff);
+    ambientLight.intensity = 1.2; // Very bright
 
-    // Treasures
+    sunLight.intensity = 0.5; // Soft directional light
+    lantern.intensity = 0; // Not needed
+
+    levelBuilder.buildCrystalCore();
+    setWeather('dust'); // Crystal dust
+
     createTreasure(0, -20, 'gem');
     createTreasure(-40, 40, 'gem');
     createTreasure(40, -40, 'gem');
   }
 
-  gameState.structures = levelBuilder.structures;
+  // Snap structures to ground
+  levelBuilder.structures.forEach(s => {
+    if (type === 'jungle') s.y = levelBuilder.getJungleHeight(s.x, s.z);
+    else s.y = levelBuilder.getTerrainHeight(s.x, s.z);
+  });
 
-  // Reset Player
+  gameState.structures = levelBuilder.structures;
   camera.position.set(0, 5, 5);
   velocity.set(0, 0, 0);
 }
 
-// Initial Load
 loadLevel('jungle');
 
 /* ===================== TREASURES ===================== */
 function createTreasure(x, z, type = 'gold') {
   let y = 0.5;
-  if (gameState.currentLevel === 'subterranean') {
+  if (gameState.currentLevel === 'crystal_core') {
     y = levelBuilder.getTerrainHeight(x, z) + 0.5;
+  } else {
+    y = levelBuilder.getJungleHeight(x, z) + 0.5;
   }
 
   const group = new THREE.Group();
@@ -205,12 +278,13 @@ async function interactNPC() {
   audioManager.play('collect');
 }
 
-/* ===================== MAP SYSTEM ===================== */
+/* ===================== UI SYSTEMS ===================== */
+// Map
 const mapCanvas = document.createElement('canvas');
 mapCanvas.width = 512; mapCanvas.height = 512;
 const mapCtx = mapCanvas.getContext('2d');
 const mapOverlay = document.createElement('div');
-mapOverlay.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 400px; height: 400px; background-color: #2a2a2a; border: 4px solid #555; border-radius: 8px; display: none; z-index: 1500;`;
+mapOverlay.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 400px; height: 400px; background-color: #2a2a2a; border: 4px solid #555; border-radius: 50%; display: none; z-index: 1500; overflow: hidden; box-shadow: 0 0 20px rgba(0,0,0,0.8);`;
 const mapImage = document.createElement('img');
 mapImage.style.width = '100%'; mapImage.style.height = '100%';
 mapOverlay.appendChild(mapImage);
@@ -219,39 +293,79 @@ document.body.appendChild(mapOverlay);
 function toggleMap() {
   gameState.mapVisible = !gameState.mapVisible;
   mapOverlay.style.display = gameState.mapVisible ? 'block' : 'none';
-  if (gameState.mapVisible) {
-    updateMap();
-    controls.unlock();
-  } else {
-    controls.lock();
-  }
 }
 
 function updateMap() {
   mapCtx.fillStyle = '#111'; mapCtx.fillRect(0, 0, 512, 512);
+  mapCtx.strokeStyle = '#333'; mapCtx.lineWidth = 2;
+  mapCtx.beginPath(); mapCtx.arc(256, 256, 250, 0, Math.PI * 2); mapCtx.stroke();
 
-  // Draw Structures
   const scale = 512 / 200; const offsetX = 256; const offsetY = 256;
-  mapCtx.fillStyle = '#888'; mapCtx.font = '12px Arial'; mapCtx.textAlign = 'center';
+
   gameState.structures.forEach(struct => {
     const mx = struct.x * scale + offsetX; const my = struct.z * scale + offsetY;
-    mapCtx.fillRect(mx - 8, my - 8, 16, 16);
+    mapCtx.fillStyle = '#888'; mapCtx.fillRect(mx - 8, my - 8, 16, 16);
     mapCtx.fillStyle = '#aaa'; mapCtx.fillText(struct.type === 'cave' ? "🕳️" : "🏛️", mx, my + 4);
   });
 
-  // Draw Treasures
-  mapCtx.fillStyle = '#ffaa00';
   treasures.forEach(t => {
     if (!t.userData.collected) {
       const mx = t.position.x * scale + offsetX; const my = t.position.z * scale + offsetY;
-      mapCtx.fillRect(mx - 3, my - 3, 6, 6);
+      mapCtx.fillStyle = '#ffaa00'; mapCtx.fillRect(mx - 3, my - 3, 6, 6);
     }
   });
 
-  // Player
   const px = camera.position.x * scale + offsetX; const py = camera.position.z * scale + offsetY;
-  mapCtx.fillStyle = '#00ff00'; mapCtx.beginPath(); mapCtx.arc(px, py, 6, 0, Math.PI * 2); mapCtx.fill();
+  mapCtx.fillStyle = '#00ff00'; mapCtx.beginPath(); mapCtx.arc(px, py, 8, 0, Math.PI * 2); mapCtx.fill();
+
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const angle = Math.atan2(dir.z, dir.x);
+  mapCtx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+  mapCtx.beginPath(); mapCtx.moveTo(px, py);
+  mapCtx.arc(px, py, 40, angle - 0.5, angle + 0.5);
+  mapCtx.fill();
+
   mapImage.src = mapCanvas.toDataURL();
+}
+
+// Settings UI
+const settingsBtn = document.createElement('div');
+settingsBtn.id = 'settings-btn';
+settingsBtn.innerHTML = '⚙️';
+settingsBtn.style.cssText = `position: fixed; top: 20px; right: 90px; font-size: 30px; cursor: pointer; z-index: 1000; color: white; text-shadow: 0 0 5px black;`;
+settingsBtn.onclick = toggleSettings;
+document.body.appendChild(settingsBtn);
+
+const settingsUI = document.createElement('div');
+settingsUI.id = 'settings-ui';
+settingsUI.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; color: white; display: none; z-index: 2000; font-family: sans-serif;`;
+settingsUI.innerHTML = `
+  <h2 style="margin-top:0">Settings</h2>
+  <div style="margin-bottom: 15px;">
+    <label>Weather:</label>
+    <select id="weather-select" style="margin-left: 10px; padding: 5px;">
+      <option value="clear">Clear</option>
+      <option value="rain">Rain</option>
+      <option value="dust">Crystal Dust</option>
+    </select>
+  </div>
+  <button id="close-settings" style="padding: 5px 15px; cursor: pointer;">Close</button>
+`;
+document.body.appendChild(settingsUI);
+
+document.getElementById('weather-select').addEventListener('change', (e) => {
+  setWeather(e.target.value);
+});
+document.getElementById('close-settings').addEventListener('click', toggleSettings);
+
+function toggleSettings() {
+  gameState.settingsVisible = !gameState.settingsVisible;
+  settingsUI.style.display = gameState.settingsVisible ? 'block' : 'none';
+  if (gameState.settingsVisible) {
+    controls.unlock();
+  } else {
+    controls.lock();
+  }
 }
 
 /* ===================== GAME LOOP ===================== */
@@ -271,21 +385,19 @@ function update() {
     playerPos.x = Math.max(-95, Math.min(95, playerPos.x));
     playerPos.z = Math.max(-95, Math.min(95, playerPos.z));
 
-    // Physics & Interaction
-    if (gameState.currentLevel === 'subterranean') {
-      const h = levelBuilder.getTerrainHeight(playerPos.x, playerPos.z);
-      playerPos.y = h + 1.7;
+    let terrainH = 0;
+    if (gameState.currentLevel === 'crystal_core') {
+      terrainH = levelBuilder.getTerrainHeight(playerPos.x, playerPos.z);
     } else {
-      playerPos.y = 1.7; // Flat jungle
+      terrainH = levelBuilder.getJungleHeight(playerPos.x, playerPos.z);
+    }
+    playerPos.y = terrainH + 1.8;
 
-      // Check Cave Entrance
+    if (gameState.currentLevel === 'jungle') {
       const cave = gameState.structures.find(s => s.type === 'cave');
-      if (cave) {
-        const dist = Math.hypot(playerPos.x - cave.x, playerPos.z - cave.z);
-        if (dist < 3) {
-          showMessage("Entering the Depths...", 0x000000, 2000);
-          setTimeout(() => loadLevel('subterranean'), 1000);
-        }
+      if (cave && Math.hypot(playerPos.x - cave.x, playerPos.z - cave.z) < 3) {
+        showMessage("Entering the Crystal Core...", 0xffffff, 2000);
+        setTimeout(() => loadLevel('crystal_core'), 1000);
       }
     }
 
@@ -296,6 +408,8 @@ function update() {
   }
 
   updateNPC(deltaTime);
+  updateWeather();
+  if (gameState.mapVisible) updateMap();
   treasures.forEach(t => { if (!t.userData.collected) t.rotation.y += deltaTime; });
   updateHUD();
 }

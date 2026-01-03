@@ -5,7 +5,7 @@ export class LevelBuilder {
     this.scene = scene;
     this.materials = {};
     this.structures = [];
-    this.levelObjects = []; // Track objects for cleanup
+    this.levelObjects = [];
     this.loadMaterials();
     this.noiseScale = 0.05;
     this.heightScale = 8;
@@ -17,14 +17,13 @@ export class LevelBuilder {
     this.materials.bark = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9, map: this.createNoiseTexture(0x3e2723, 0x281a17) });
     this.materials.leaves = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.8, side: THREE.DoubleSide });
 
-    // Subterranean
-    this.materials.rockGround = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9, map: this.createNoiseTexture(0x1a1a1a, 0x0d0d0d) });
-    this.materials.mushroomCap = new THREE.MeshStandardMaterial({ color: 0x9933ff, emissive: 0x5500aa, emissiveIntensity: 0.8, roughness: 0.4 });
-    this.materials.mushroomStem = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.8 });
-    this.materials.crystal = new THREE.MeshPhysicalMaterial({ color: 0x00ffff, emissive: 0x004444, emissiveIntensity: 0.5, metalness: 0.1, roughness: 0.1, transmission: 0.6, thickness: 1.0 });
+    // Crystal Core (Bright & Magical)
+    this.materials.coreGround = new THREE.MeshStandardMaterial({ color: 0xe0ffff, roughness: 0.4, metalness: 0.1, emissive: 0x004444, emissiveIntensity: 0.2 });
+    this.materials.lightPillar = new THREE.MeshPhysicalMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2.0, transparent: true, opacity: 0.8, transmission: 0.5 });
+    this.materials.crystalTree = new THREE.MeshPhysicalMaterial({ color: 0xff00ff, emissive: 0x550055, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.1 });
 
     // Shared
-    this.materials.stone = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, map: this.createNoiseTexture(0x555555, 0x333333) });
+    this.materials.stone = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, map: this.createNoiseTexture(0x888888, 0x666666) });
   }
 
   createNoiseTexture(color1, color2) {
@@ -52,6 +51,10 @@ export class LevelBuilder {
       + Math.cos(z * this.noiseScale * 3) * 2;
   }
 
+  getJungleHeight(x, z) {
+    return Math.sin(x * 0.1) * Math.cos(z * 0.1) * 2;
+  }
+
   clearLevel() {
     this.levelObjects.forEach(obj => this.scene.remove(obj));
     this.levelObjects = [];
@@ -62,14 +65,12 @@ export class LevelBuilder {
     this.clearLevel();
     console.log("Building Jungle...");
 
-    // 1. Ground
     const geometry = new THREE.PlaneGeometry(200, 200, 64, 64);
     const posAttribute = geometry.attributes.position;
     for (let i = 0; i < posAttribute.count; i++) {
       const x = posAttribute.getX(i);
       const y = posAttribute.getY(i);
-      // Flatter terrain for jungle
-      const h = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 2;
+      const h = this.getJungleHeight(x, -y);
       posAttribute.setZ(i, h);
     }
     geometry.computeVertexNormals();
@@ -79,27 +80,24 @@ export class LevelBuilder {
     this.scene.add(ground);
     this.levelObjects.push(ground);
 
-    // 2. Trees
     for (let i = 0; i < 200; i++) {
       const x = (Math.random() - 0.5) * 180;
       const z = (Math.random() - 0.5) * 180;
-      if (Math.abs(x) < 10 && Math.abs(z) < 10) continue; // Clear spawn
-      this.createTree(x, 0, z);
+      if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
+      const y = this.getJungleHeight(x, z);
+      this.createTree(x, y, z);
     }
 
-    // 3. Structures
     this.createTemple(30, 30, "Sun Temple");
     this.createTemple(-30, -30, "Moon Ruins");
-
-    // 4. Cave Entrance
     this.createCaveEntrance(0, -40);
   }
 
-  buildSubterranean() {
+  buildCrystalCore() {
     this.clearLevel();
-    console.log("Building Subterranean...");
+    console.log("Building Crystal Core...");
 
-    // 1. Terrain
+    // 1. Terrain (Bright & Crystalline)
     const geometry = new THREE.PlaneGeometry(200, 200, 100, 100);
     const posAttribute = geometry.attributes.position;
     for (let i = 0; i < posAttribute.count; i++) {
@@ -108,29 +106,31 @@ export class LevelBuilder {
       posAttribute.setZ(i, this.getTerrainHeight(x, -y));
     }
     geometry.computeVertexNormals();
-    const ground = new THREE.Mesh(geometry, this.materials.rockGround);
+    const ground = new THREE.Mesh(geometry, this.materials.coreGround);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
     this.levelObjects.push(ground);
 
-    // 2. Flora
-    for (let i = 0; i < 80; i++) {
+    // 2. Light Pillars (Giant glowing structures)
+    for (let i = 0; i < 50; i++) {
       const x = (Math.random() - 0.5) * 180;
       const z = (Math.random() - 0.5) * 180;
       const y = this.getTerrainHeight(x, z);
-      this.createMushroom(x, y, z);
+      this.createLightPillar(x, y, z);
     }
-    for (let i = 0; i < 120; i++) {
+
+    // 3. Crystal Trees
+    for (let i = 0; i < 80; i++) {
       const x = (Math.random() - 0.5) * 190;
       const z = (Math.random() - 0.5) * 190;
       const y = this.getTerrainHeight(x, z);
-      this.createCrystal(x, y, z);
+      this.createCrystalTree(x, y, z);
     }
 
-    // 3. Structures
-    this.createTemple(0, -20, "Core Shrine");
-    this.createTemple(-40, 40, "North Tomb");
+    // 4. Structures (White Marble)
+    this.createTemple(0, -20, "Core Sanctum");
+    this.createTemple(-40, 40, "North Prism");
     this.createTemple(40, -40, "South Spire");
   }
 
@@ -148,35 +148,44 @@ export class LevelBuilder {
     this.levelObjects.push(group);
   }
 
-  createMushroom(x, y, z) {
-    const scale = 1 + Math.random() * 2;
+  createLightPillar(x, y, z) {
+    const height = 10 + Math.random() * 20;
+    const width = 0.5 + Math.random() * 1.5;
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(width, width, height, 6), this.materials.lightPillar);
+    pillar.position.set(x, y + height / 2, z);
+
+    // Add point light to make it glow
+    const light = new THREE.PointLight(0x00ffff, 2, 20);
+    light.position.set(x, y + 5, z);
+
+    this.scene.add(pillar);
+    this.scene.add(light);
+    this.levelObjects.push(pillar);
+    this.levelObjects.push(light);
+  }
+
+  createCrystalTree(x, y, z) {
+    const height = 2 + Math.random() * 4;
     const group = new THREE.Group();
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.2 * scale, 0.3 * scale, 3 * scale, 8), this.materials.mushroomStem);
-    stem.position.y = 1.5 * scale;
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(1.5 * scale, 1 * scale, 16, 1, true), this.materials.mushroomCap);
-    cap.position.y = 3 * scale;
-    const light = new THREE.PointLight(0x9933ff, 1, 10 * scale);
-    light.position.y = 2 * scale;
-    group.add(stem, cap, light);
+    const trunk = new THREE.Mesh(new THREE.ConeGeometry(0.5, height, 4), this.materials.crystalTree);
+    trunk.position.y = height / 2;
+    group.add(trunk);
+
+    // Branches
+    for (let i = 0; i < 3; i++) {
+      const branch = new THREE.Mesh(new THREE.ConeGeometry(0.2, 2, 4), this.materials.crystalTree);
+      branch.position.y = height * 0.6;
+      branch.rotation.z = (Math.random() - 0.5) * 2;
+      branch.rotation.x = (Math.random() - 0.5) * 2;
+      group.add(branch);
+    }
+
     group.position.set(x, y, z);
     this.scene.add(group);
     this.levelObjects.push(group);
   }
 
-  createCrystal(x, y, z) {
-    const height = 0.5 + Math.random() * 1.5;
-    const crystal = new THREE.Mesh(new THREE.ConeGeometry(0.2, height, 4), this.materials.crystal);
-    crystal.position.set(x, y + height / 2, z);
-    crystal.rotation.x = (Math.random() - 0.5) * 0.5;
-    crystal.rotation.z = (Math.random() - 0.5) * 0.5;
-    this.scene.add(crystal);
-    this.levelObjects.push(crystal);
-  }
-
   createTemple(x, z, name) {
-    // Height depends on level type, but we can approximate or pass it
-    // For simplicity, we'll just raycast or use terrain func if available
-    // Here we assume Y=0 for jungle, terrain func for sub
     const group = new THREE.Group();
     const base = new THREE.Mesh(new THREE.BoxGeometry(12, 1, 18), this.materials.stone);
     group.add(base);
@@ -192,11 +201,6 @@ export class LevelBuilder {
     roof.position.y = 7.5;
     group.add(roof);
 
-    // Position logic handled by caller usually, but we'll set it here
-    // If jungle, Y is approx 0. If sub, use getTerrainHeight
-    // We'll just set X/Z and let caller adjust Y or assume 0 for now
-    group.position.set(x, 0, z);
-
     this.scene.add(group);
     this.levelObjects.push(group);
     this.structures.push({ x, z, name, type: 'temple' });
@@ -204,18 +208,16 @@ export class LevelBuilder {
   }
 
   createCaveEntrance(x, z) {
+    const y = this.getJungleHeight(x, z);
     const group = new THREE.Group();
     const caveGeo = new THREE.SphereGeometry(4, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
     const caveMat = new THREE.MeshStandardMaterial({ color: 0x111111, side: THREE.DoubleSide });
     const cave = new THREE.Mesh(caveGeo, caveMat);
     cave.scale.set(1, 0.5, 1);
     group.add(cave);
-
-    const textDiv = document.createElement('div'); // Just a marker logic
-
-    group.position.set(x, 0, z);
+    group.position.set(x, y, z);
     this.scene.add(group);
     this.levelObjects.push(group);
-    this.structures.push({ x, z, name: "Cave Entrance", type: 'cave' });
+    this.structures.push({ x, z, name: "Core Entrance", type: 'cave' });
   }
 }
