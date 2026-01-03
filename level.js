@@ -21,6 +21,7 @@ export class LevelBuilder {
     this.materials.coreGround = new THREE.MeshStandardMaterial({ color: 0xe0ffff, roughness: 0.4, metalness: 0.1, emissive: 0x004444, emissiveIntensity: 0.2 });
     this.materials.lightPillar = new THREE.MeshPhysicalMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2.0, transparent: true, opacity: 0.8, transmission: 0.5 });
     this.materials.crystalTree = new THREE.MeshPhysicalMaterial({ color: 0xff00ff, emissive: 0x550055, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.1 });
+    this.materials.crystalArch = new THREE.MeshPhysicalMaterial({ color: 0x0088ff, emissive: 0x002244, emissiveIntensity: 0.3, metalness: 0.9, roughness: 0.0, transmission: 0.2 });
 
     // Shared
     this.materials.stone = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, map: this.createNoiseTexture(0x888888, 0x666666) });
@@ -46,13 +47,20 @@ export class LevelBuilder {
   }
 
   getTerrainHeight(x, z) {
-    return Math.sin(x * this.noiseScale) * Math.cos(z * this.noiseScale) * this.heightScale
-      + Math.sin(x * this.noiseScale * 2.5 + z) * 2
-      + Math.cos(z * this.noiseScale * 3) * 2;
+    // Old Subterranean height (unused now for core)
+    return Math.sin(x * this.noiseScale) * Math.cos(z * this.noiseScale) * this.heightScale;
   }
 
   getJungleHeight(x, z) {
     return Math.sin(x * 0.1) * Math.cos(z * 0.1) * 2;
+  }
+
+  getCrystalHeight(x, z) {
+    // Flatter terrain with occasional steps/plateaus
+    // Using Math.floor to create steps
+    const largeStep = Math.floor(Math.sin(x * 0.05) * 2) * 2;
+    const smallDetail = Math.cos(z * 0.1) * 0.5;
+    return largeStep + smallDetail;
   }
 
   clearLevel() {
@@ -97,13 +105,13 @@ export class LevelBuilder {
     this.clearLevel();
     console.log("Building Crystal Core...");
 
-    // 1. Terrain (Bright & Crystalline)
+    // 1. Terrain (Flatter)
     const geometry = new THREE.PlaneGeometry(200, 200, 100, 100);
     const posAttribute = geometry.attributes.position;
     for (let i = 0; i < posAttribute.count; i++) {
       const x = posAttribute.getX(i);
       const y = posAttribute.getY(i);
-      posAttribute.setZ(i, this.getTerrainHeight(x, -y));
+      posAttribute.setZ(i, this.getCrystalHeight(x, -y));
     }
     geometry.computeVertexNormals();
     const ground = new THREE.Mesh(geometry, this.materials.coreGround);
@@ -112,23 +120,31 @@ export class LevelBuilder {
     this.scene.add(ground);
     this.levelObjects.push(ground);
 
-    // 2. Light Pillars (Giant glowing structures)
-    for (let i = 0; i < 50; i++) {
+    // 2. Light Pillars
+    for (let i = 0; i < 30; i++) {
       const x = (Math.random() - 0.5) * 180;
       const z = (Math.random() - 0.5) * 180;
-      const y = this.getTerrainHeight(x, z);
+      const y = this.getCrystalHeight(x, z);
       this.createLightPillar(x, y, z);
     }
 
     // 3. Crystal Trees
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 60; i++) {
       const x = (Math.random() - 0.5) * 190;
       const z = (Math.random() - 0.5) * 190;
-      const y = this.getTerrainHeight(x, z);
+      const y = this.getCrystalHeight(x, z);
       this.createCrystalTree(x, y, z);
     }
 
-    // 4. Structures (White Marble)
+    // 4. Crystal Arches (New Feature)
+    for (let i = 0; i < 15; i++) {
+      const x = (Math.random() - 0.5) * 160;
+      const z = (Math.random() - 0.5) * 160;
+      const y = this.getCrystalHeight(x, z);
+      this.createCrystalArch(x, y, z, Math.random() * Math.PI);
+    }
+
+    // 5. Structures
     this.createTemple(0, -20, "Core Sanctum");
     this.createTemple(-40, 40, "North Prism");
     this.createTemple(40, -40, "South Spire");
@@ -153,11 +169,8 @@ export class LevelBuilder {
     const width = 0.5 + Math.random() * 1.5;
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(width, width, height, 6), this.materials.lightPillar);
     pillar.position.set(x, y + height / 2, z);
-
-    // Add point light to make it glow
     const light = new THREE.PointLight(0x00ffff, 2, 20);
     light.position.set(x, y + 5, z);
-
     this.scene.add(pillar);
     this.scene.add(light);
     this.levelObjects.push(pillar);
@@ -170,8 +183,6 @@ export class LevelBuilder {
     const trunk = new THREE.Mesh(new THREE.ConeGeometry(0.5, height, 4), this.materials.crystalTree);
     trunk.position.y = height / 2;
     group.add(trunk);
-
-    // Branches
     for (let i = 0; i < 3; i++) {
       const branch = new THREE.Mesh(new THREE.ConeGeometry(0.2, 2, 4), this.materials.crystalTree);
       branch.position.y = height * 0.6;
@@ -179,8 +190,24 @@ export class LevelBuilder {
       branch.rotation.x = (Math.random() - 0.5) * 2;
       group.add(branch);
     }
-
     group.position.set(x, y, z);
+    this.scene.add(group);
+    this.levelObjects.push(group);
+  }
+
+  createCrystalArch(x, y, z, rotation) {
+    const group = new THREE.Group();
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-4, 0, 0),
+      new THREE.Vector3(-2, 4, 0),
+      new THREE.Vector3(2, 4, 0),
+      new THREE.Vector3(4, 0, 0)
+    ]);
+    const geometry = new THREE.TubeGeometry(curve, 20, 0.4, 8, false);
+    const mesh = new THREE.Mesh(geometry, this.materials.crystalArch);
+    group.add(mesh);
+    group.position.set(x, y, z);
+    group.rotation.y = rotation;
     this.scene.add(group);
     this.levelObjects.push(group);
   }
@@ -200,7 +227,6 @@ export class LevelBuilder {
     roof.rotation.y = Math.PI / 4;
     roof.position.y = 7.5;
     group.add(roof);
-
     this.scene.add(group);
     this.levelObjects.push(group);
     this.structures.push({ x, z, name, type: 'temple' });

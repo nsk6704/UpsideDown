@@ -55,7 +55,7 @@ scene.add(controls.getObject());
 
 document.body.addEventListener("click", async (e) => {
   // Ignore clicks on UI
-  if (e.target.closest('#settings-ui') || e.target.closest('#settings-btn')) return;
+  if (e.target.closest('#settings-ui') || e.target.closest('#settings-btn') || e.target.closest('#pause-ui')) return;
 
   if (!gameState.playing && !renderer.xr.isPresenting) {
     controls.lock();
@@ -70,7 +70,15 @@ document.body.addEventListener("click", async (e) => {
 });
 
 controls.addEventListener('unlock', () => {
-  if (!gameState.gameWon && !gameState.mapVisible && !gameState.settingsVisible) showMessage("Click to continue", 0xffffff);
+  if (!gameState.gameWon && !gameState.mapVisible && !gameState.settingsVisible) {
+    const pauseUI = document.getElementById('pause-ui');
+    if (pauseUI) pauseUI.style.display = 'block';
+  }
+});
+
+controls.addEventListener('lock', () => {
+  const pauseUI = document.getElementById('pause-ui');
+  if (pauseUI) pauseUI.style.display = 'none';
 });
 
 /* ===================== MOVEMENT ===================== */
@@ -224,7 +232,7 @@ function loadLevel(type) {
   // Snap structures to ground
   levelBuilder.structures.forEach(s => {
     if (type === 'jungle') s.y = levelBuilder.getJungleHeight(s.x, s.z);
-    else s.y = levelBuilder.getTerrainHeight(s.x, s.z);
+    else s.y = levelBuilder.getCrystalHeight(s.x, s.z);
   });
 
   gameState.structures = levelBuilder.structures;
@@ -238,7 +246,7 @@ loadLevel('jungle');
 function createTreasure(x, z, type = 'gold') {
   let y = 0.5;
   if (gameState.currentLevel === 'crystal_core') {
-    y = levelBuilder.getTerrainHeight(x, z) + 0.5;
+    y = levelBuilder.getCrystalHeight(x, z) + 0.5;
   } else {
     y = levelBuilder.getJungleHeight(x, z) + 0.5;
   }
@@ -387,7 +395,7 @@ function update() {
 
     let terrainH = 0;
     if (gameState.currentLevel === 'crystal_core') {
-      terrainH = levelBuilder.getTerrainHeight(playerPos.x, playerPos.z);
+      terrainH = levelBuilder.getCrystalHeight(playerPos.x, playerPos.z);
     } else {
       terrainH = levelBuilder.getJungleHeight(playerPos.x, playerPos.z);
     }
@@ -429,6 +437,21 @@ async function winGame() {
   showMessage("YOU ARE THE MASTER EXPLORER!", 0x00ff00, 8000);
   gameState.playing = false;
 }
+
+// Pause UI
+const pauseUI = document.createElement('div');
+pauseUI.id = 'pause-ui';
+pauseUI.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; color: white; display: none; z-index: 2000; font-family: sans-serif; text-align: center;`;
+pauseUI.innerHTML = `
+  <h2 style="margin-top:0">Paused</h2>
+  <button id="resume-btn" style="padding: 10px 20px; font-size: 18px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px;">Resume Game</button>
+`;
+document.body.appendChild(pauseUI);
+
+document.getElementById('resume-btn').addEventListener('click', () => {
+  controls.lock();
+  pauseUI.style.display = 'none';
+});
 
 /* ===================== HUD ===================== */
 const hudElement = document.createElement('div');
