@@ -4,15 +4,14 @@ export class AIManager {
   constructor() {
     this.apiKey = CONFIG.GROQ_API_KEY;
     this.model = CONFIG.GROQ_MODEL;
-    this.conversationHistory = [];
     this.lastNarration = Date.now();
-    this.narrationCooldown = 30000; // 30 seconds between narrations
+    this.narrationCooldown = 15000;
   }
 
   async generateNarration(gameState, event) {
     if (!CONFIG.AI_ENABLED || !CONFIG.AI_NARRATION) return null;
-    if (Date.now() - this.lastNarration < this.narrationCooldown) return null;
-    
+    if (event !== 'intro' && event !== 'treasure_found' && Date.now() - this.lastNarration < this.narrationCooldown) return null;
+
     try {
       const prompt = this.buildNarrationPrompt(gameState, event);
       const response = await this.callGroqAPI(prompt);
@@ -20,139 +19,93 @@ export class AIManager {
       return response;
     } catch (error) {
       console.error('AI Narration error:', error);
-      return null;
+      return this.getFallbackResponse(event);
     }
   }
 
-  async getDynamicHint(gameState) {
-    if (!CONFIG.AI_ENABLED) return null;
-    
+  async getDynamicHint(gameState, playerPos) {
+    if (!CONFIG.AI_ENABLED) return this.getFallbackHint(gameState, playerPos);
+
     try {
-      const prompt = `You are a horror game narrator. The player has collected ${gameState.keysCollected}/${CONFIG.KEYS_REQUIRED} keys, has ${gameState.sanity}% sanity, and ${gameState.flashlightBattery}% battery. Give them a cryptic, short hint (1 sentence, max 15 words) about what to do next.`;
+      // Find nearest structure
+      let nearest = null;
+      let minDist = Infinity;
+
+      if (gameState.structures) {
+        gameState.structures.forEach(struct => {
+          const dist = Math.hypot(struct.x - playerPos.x, struct.z - playerPos.z);
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = struct;
+          }
+        });
+      }
+
+      let locationContext = nearest
+        ? `The player is near ${nearest.name} (${Math.floor(minDist)}m away).`
+        : "The player is lost in the deep caves.";
+
+      const prompt = `You are a guide in a subterranean world. ${locationContext} The player has found ${gameState.treasuresCollected}/${gameState.treasuresRequired} crystals. Give them a specific direction or hint (max 15 words).`;
       return await this.callGroqAPI(prompt);
     } catch (error) {
-      console.error('AI Hint error:', error);
-      return null;
+      return this.getFallbackHint(gameState, playerPos);
     }
   }
 
-  async adaptDifficulty(gameState) {
-    if (!CONFIG.AI_ENABLED || !CONFIG.AI_ADAPTIVE_DIFFICULTY) return null;
-    
-    try {
-      const prompt = `Based on this horror game state: Keys: ${gameState.keysCollected}/${CONFIG.KEYS_REQUIRED}, Sanity: ${gameState.sanity}%, Battery: ${gameState.flashlightBattery}%, Deaths: ${gameState.deaths || 0}. Should difficulty be: "easier", "same", or "harder"? Respond with just one word.`;
-      const response = await this.callGroqAPI(prompt);
-      return response.toLowerCase().trim();
-    } catch (error) {
-      console.error('AI Difficulty error:', error);
-      return null;
+  getFallbackHint(gameState, playerPos) {
+    // Basic logic if AI fails
+    let nearest = null;
+    let minDist = Infinity;
+
+    if (gameState.structures) {
+      gameState.structures.forEach(struct => {
+        const dist = Math.hypot(struct.x - playerPos.x, struct.z - playerPos.z);
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = struct;
+        }
+      });
     }
+
+    if (nearest) {
+      return `Seek the ${nearest.name}. It is close.`;
+    }
+    return "Look for the ancient stone structures.";
   }
 
   buildNarrationPrompt(gameState, event) {
-    let context = `You are narrating a psychological horror game. Current state: Sanity ${gameState.sanity}%, Battery ${gameState.flashlightBattery}%, Keys ${gameState.keysCollected}/${CONFIG.KEYS_REQUIRED}.`;
-    
-    switch(event) {
-      case 'key_collected':
-        context += ' The player just collected a key.';
-        break;
-      case 'monster_spotted':
-        context += ' The player encountered a monster.';
-        break;
-      case 'low_sanity':
-        context += ' The player has low sanity.';
-        break;
-      case 'low_battery':
-        context += ' The flashlight battery is dying.';
-        break;
-      case 'door_locked':
-        context += ' The player found a locked door.';
-        break;
-      default:
-        context += ' Generate atmospheric horror narration.';
+    let context = `You are the narrator of a Journey to the Center of the Earth. The player is exploring a bioluminescent cave system. Current progress: ${gameState.treasuresCollected}/${gameState.treasuresRequired} crystals found.`;
+    switch (event) {
+      case 'intro': context += ' The player has just descended. Describe the glowing fungi and ancient silence.'; break;
+      case 'treasure_found': context += ' The player found a glowing crystal. Describe its power.'; break;
+      default: context += ' Generate atmospheric subterranean narration.';
     }
-    
-    context += ' Respond with ONE short sentence (max 12 words) of creepy narration. Be atmospheric and unsettling.';
+    context += ' Respond with ONE short sentence (max 15 words). Be mysterious.';
     return context;
   }
 
   async callGroqAPI(prompt) {
-    if (this.apiKey === 'YOUR_GROQ_API_KEY_HERE') {
-      console.warn('Groq API key not set. Using fallback responses.');
-      return this.getFallbackResponse(prompt);
-    }
-
+    if (this.apiKey === 'YOUR_GROQ_API_KEY_HERE' || !this.apiKey) return this.getFallbackResponse('general');
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a horror game narrator. Be brief, atmospheric, and unsettling.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.9,
-        max_tokens: 100
+        messages: [{ role: 'system', content: 'You are a sci-fi/fantasy narrator. Be vivid and brief.' }, { role: 'user', content: prompt }],
+        temperature: 0.7, max_tokens: 60
       })
     });
-
-    if (!response.ok) {
-      throw new Error(`Groq API error: ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`Groq API error: ${response.status}`);
     const data = await response.json();
     return data.choices[0]?.message?.content || '';
   }
 
-  getFallbackResponse(prompt) {
+  getFallbackResponse(type) {
     const fallbacks = {
-      key: [
-        "One step closer to freedom... or oblivion.",
-        "The key feels unnaturally cold in your hand.",
-        "You hear whispers as you grasp the key.",
-        "Something watches from the shadows."
-      ],
-      monster: [
-        "It knows you're here.",
-        "Run. Don't look back.",
-        "The darkness has eyes.",
-        "Your heartbeat echoes in the void."
-      ],
-      sanity: [
-        "Reality begins to fracture.",
-        "Are those footsteps yours?",
-        "The walls seem to breathe.",
-        "You feel yourself slipping away."
-      ],
-      battery: [
-        "The darkness hungers.",
-        "Your light is dying.",
-        "Soon, only shadows remain.",
-        "The battery flickers with malice."
-      ],
-      hint: [
-        "Seek the glowing keys.",
-        "The exit lies in shadow.",
-        "Trust nothing, question everything.",
-        "Your only escape is forward."
-      ]
+      intro: ["The earth hums with a strange, glowing life.", "Welcome to the depths.", "Giant fungi tower above you."],
+      treasure_found: ["The crystal vibrates in your hand.", "A piece of the earth's heart.", "It glows with an inner fire."],
+      general: ["Shadows dance on the cavern walls.", "You hear the drip of ancient water."]
     };
-    
-    const type = prompt.includes('key') ? 'key' :
-                 prompt.includes('monster') ? 'monster' :
-                 prompt.includes('sanity') ? 'sanity' :
-                 prompt.includes('battery') ? 'battery' : 'hint';
-    
-    const options = fallbacks[type];
-    return options[Math.floor(Math.random() * options.length)];
+    return (fallbacks[type] || fallbacks['general'])[0];
   }
 }
