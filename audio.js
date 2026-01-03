@@ -39,8 +39,13 @@ export class AudioManager {
 
   async loadSound(name, path) {
     try {
-      const response = await fetch(path);
-      if (!response.ok) throw new Error(`Failed to load ${path}`);
+      let response = await fetch(path);
+      if (!response.ok) {
+        // Try .wav fallback
+        const wavPath = path.replace('.mp3', '.wav');
+        response = await fetch(wavPath);
+        if (!response.ok) throw new Error(`Failed to load ${path} or ${wavPath}`);
+      }
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await this.context.decodeAudioData(arrayBuffer);
       this.sounds[name] = audioBuffer;
