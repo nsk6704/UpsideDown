@@ -85,6 +85,7 @@ controls.addEventListener('lock', () => {
 const move = { f: false, b: false, l: false, r: false, sprint: false };
 const velocity = new THREE.Vector3();
 const clock = new THREE.Clock();
+let footstepTimer = 0;
 
 document.addEventListener("keydown", e => {
   if (e.code === "KeyW") move.f = true;
@@ -383,8 +384,8 @@ function update() {
   if (controls.isLocked && gameState.playing) {
     const speed = 5.0 * (move.sprint ? 1.6 : 1);
     velocity.set(0, 0, 0);
-    if (move.f) velocity.z -= speed * deltaTime;
-    if (move.b) velocity.z += speed * deltaTime;
+    if (move.f) velocity.z += speed * deltaTime;
+    if (move.b) velocity.z -= speed * deltaTime;
     if (move.l) velocity.x -= speed * deltaTime;
     if (move.r) velocity.x += speed * deltaTime;
     controls.moveRight(velocity.x); controls.moveForward(velocity.z);
@@ -413,6 +414,17 @@ function update() {
     treasures.forEach(t => {
       if (!t.userData.collected && playerPos.distanceTo(t.position) < 3) collectTreasure(t);
     });
+
+    // Footsteps
+    if (move.f || move.b || move.l || move.r) {
+      footstepTimer += deltaTime * (move.sprint ? 1.6 : 1);
+      if (footstepTimer > 0.45) { // Threshold for step sound
+        audioManager.play('footstep');
+        footstepTimer = 0;
+      }
+    } else {
+      footstepTimer = 0;
+    }
   }
 
   updateNPC(deltaTime);
@@ -453,7 +465,6 @@ document.getElementById('resume-btn').addEventListener('click', () => {
   pauseUI.style.display = 'none';
 });
 
-/* ===================== HUD ===================== */
 const hudElement = document.createElement('div');
 hudElement.style.cssText = `position: fixed; top: 20px; left: 20px; color: white; font-family: 'Courier New', monospace; font-size: 18px; text-shadow: 2px 2px 4px black; pointer-events: none; z-index: 1000; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px;`;
 document.body.appendChild(hudElement);
@@ -464,12 +475,73 @@ startMessage.textContent = "Click to Explore";
 startMessage.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 32px; font-family: 'Courier New', monospace; text-shadow: 2px 2px 4px black; pointer-events: none; z-index: 2000; background: rgba(0,0,0,0.5); padding: 20px; border-radius: 10px;`;
 document.body.appendChild(startMessage);
 
+const compassElement = document.createElement('div');
+compassElement.id = 'compass';
+compassElement.style.cssText = `
+  position: fixed; 
+  top: 20px; 
+  left: 50%; 
+  transform: translateX(-50%); 
+  width: 300px; 
+  height: 40px; 
+  background: rgba(255, 255, 255, 0.1); 
+  backdrop-filter: blur(10px); 
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2); 
+  border-radius: 20px; 
+  overflow: hidden; 
+  z-index: 1000; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+`;
+const compassTape = document.createElement('div');
+compassTape.style.cssText = `
+  position: absolute;
+  white-space: nowrap;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  color: #fff;
+  letter-spacing: 15px;
+  transition: transform 0.1s ease-out;
+  text-shadow: 0 0 5px #00ffff;
+`;
+// Create the compass text
+const directions = "N · · E · · S · · W · · ";
+compassTape.textContent = directions + directions + directions;
+compassElement.appendChild(compassTape);
+
+const compassPointer = document.createElement('div');
+compassPointer.style.cssText = `
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: #00ffff;
+  box-shadow: 0 0 10px #00ffff;
+  z-index: 2;
+`;
+compassElement.appendChild(compassPointer);
+document.body.appendChild(compassElement);
+
 function updateHUD() {
   hudElement.innerHTML = `
     <div style="margin-bottom: 5px; color: #ffd700;">🏆 TREASURES: ${gameState.treasuresCollected}/${gameState.treasuresRequired}</div>
     <div style="font-size: 14px; opacity: 0.8; margin-top: 10px;">WASD: Move | M: Map | T: Guide</div>
     <div style="font-size: 12px; color: #aaa;">ZONE: ${gameState.currentLevel.toUpperCase()}</div>
   `;
+
+  // Update Compass
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  let angle = Math.atan2(dir.x, dir.z); // Yaw angle
+  if (angle < 0) angle += Math.PI * 2;
+
+  // 300px width, tape is long. We want to map 0-2PI to a shift.
+  // The directions string is approx 24 chars.
+  const shift = (angle / (Math.PI * 2)) * 140; // Adjust multiplier for visual sync
+  compassTape.style.transform = `translateX(${-shift}px)`;
 }
 
 function showMessage(text, color = 0xffffff, duration = 3000) {

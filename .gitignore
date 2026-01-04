@@ -19,3 +19,5 @@ assets/sounds/*.wav
 assets/sounds/*.mp3
 !assets/sounds/.gitkeep
 config.js
+DEPLOYMENT.md
+assets.md
