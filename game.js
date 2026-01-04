@@ -25,7 +25,8 @@ const gameState = {
   settingsVisible: false,
   currentLevel: 'jungle',
   weather: 'clear', // 'clear', 'rain', 'dust'
-  structures: []
+  structures: [],
+  loadedChunks: new Set()
 };
 
 /* ===================== SCENE ===================== */
@@ -239,6 +240,47 @@ function loadLevel(type) {
   gameState.structures = levelBuilder.structures;
   camera.position.set(0, 5, 5);
   velocity.set(0, 0, 0);
+
+  // Initial Chunks
+  updateChunks(true);
+}
+
+function updateChunks(force = false) {
+  const px = camera.position.x;
+  const pz = camera.position.z;
+  const cx = Math.round(px / levelBuilder.chunkSize);
+  const cz = Math.round(pz / levelBuilder.chunkSize);
+
+  // Only update if we moved to a new chunk or force
+  const radius = 2;
+  const newChunks = new Set();
+
+  for (let x = cx - radius; x <= cx + radius; x++) {
+    for (let z = cz - radius; z <= cz + radius; z++) {
+      const key = `${x},${z}`;
+      newChunks.add(key);
+      if (!gameState.loadedChunks.has(key)) {
+        levelBuilder.buildChunk(x, z, gameState.currentLevel);
+
+        // Spawn treasure if chunk has one
+        const chunk = levelBuilder.chunks.get(key);
+        if (chunk.userData.hasTreasure) {
+          createTreasure(chunk.userData.hasTreasure.x, chunk.userData.hasTreasure.z, gameState.currentLevel === 'jungle' ? 'gold' : 'gem');
+        }
+      }
+    }
+  }
+
+  // Unload old chunks
+  gameState.loadedChunks.forEach(key => {
+    if (!newChunks.has(key)) {
+      const [ux, uz] = key.split(',').map(Number);
+      levelBuilder.removeChunk(ux, uz);
+    }
+  });
+
+  gameState.loadedChunks = newChunks;
+  gameState.structures = levelBuilder.structures; // Refresh structures from levelBuilder
 }
 
 loadLevel('jungle');
@@ -309,29 +351,45 @@ function updateMap() {
   mapCtx.strokeStyle = '#333'; mapCtx.lineWidth = 2;
   mapCtx.beginPath(); mapCtx.arc(256, 256, 250, 0, Math.PI * 2); mapCtx.stroke();
 
-  const scale = 512 / 200; const offsetX = 256; const offsetY = 256;
+  // North Indicator on Map
+  mapCtx.fillStyle = '#00ffff';
+  mapCtx.font = '24px Courier New';
+  mapCtx.textAlign = 'center';
+  mapCtx.fillText('N', 256, 35);
+
+  mapCtx.fillText('N', 256, 35);
+
+  const scale = 2; // Fixed zoom scale
+  const px = camera.position.x;
+  const pz = camera.position.z;
 
   gameState.structures.forEach(struct => {
-    const mx = struct.x * scale + offsetX; const my = struct.z * scale + offsetY;
-    mapCtx.fillStyle = '#888'; mapCtx.fillRect(mx - 8, my - 8, 16, 16);
-    mapCtx.fillStyle = '#aaa'; mapCtx.fillText(struct.type === 'cave' ? "🕳️" : "🏛️", mx, my + 4);
+    const mx = (struct.x - px) * scale + 256;
+    const my = (struct.z - pz) * scale + 256;
+    if (Math.hypot(mx - 256, my - 256) < 240) {
+      mapCtx.fillStyle = '#888'; mapCtx.fillRect(mx - 8, my - 8, 16, 16);
+      mapCtx.fillStyle = '#aaa'; mapCtx.fillText(struct.type === 'cave' ? "🕳️" : "🏛️", mx, my + 4);
+    }
   });
 
   treasures.forEach(t => {
     if (!t.userData.collected) {
-      const mx = t.position.x * scale + offsetX; const my = t.position.z * scale + offsetY;
-      mapCtx.fillStyle = '#ffaa00'; mapCtx.fillRect(mx - 3, my - 3, 6, 6);
+      const mx = (t.position.x - px) * scale + 256;
+      const my = (t.position.z - pz) * scale + 256;
+      if (Math.hypot(mx - 256, my - 256) < 240) {
+        mapCtx.fillStyle = '#ffaa00'; mapCtx.fillRect(mx - 3, my - 3, 6, 6);
+      }
     }
   });
 
-  const px = camera.position.x * scale + offsetX; const py = camera.position.z * scale + offsetY;
-  mapCtx.fillStyle = '#00ff00'; mapCtx.beginPath(); mapCtx.arc(px, py, 8, 0, Math.PI * 2); mapCtx.fill();
+  // Player in center
+  mapCtx.fillStyle = '#00ff00'; mapCtx.beginPath(); mapCtx.arc(256, 256, 8, 0, Math.PI * 2); mapCtx.fill();
 
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
   const angle = Math.atan2(dir.z, dir.x);
   mapCtx.fillStyle = 'rgba(0, 255, 0, 0.3)';
-  mapCtx.beginPath(); mapCtx.moveTo(px, py);
-  mapCtx.arc(px, py, 40, angle - 0.5, angle + 0.5);
+  mapCtx.beginPath(); mapCtx.moveTo(256, 256);
+  mapCtx.arc(256, 256, 40, angle - 0.5, angle + 0.5);
   mapCtx.fill();
 
   mapImage.src = mapCanvas.toDataURL();
@@ -391,8 +449,6 @@ function update() {
     controls.moveRight(velocity.x); controls.moveForward(velocity.z);
 
     const playerPos = controls.getObject().position;
-    playerPos.x = Math.max(-95, Math.min(95, playerPos.x));
-    playerPos.z = Math.max(-95, Math.min(95, playerPos.z));
 
     let terrainH = 0;
     if (gameState.currentLevel === 'crystal_core') {
@@ -429,6 +485,7 @@ function update() {
 
   updateNPC(deltaTime);
   updateWeather();
+  updateChunks();
   if (gameState.mapVisible) updateMap();
   treasures.forEach(t => { if (!t.userData.collected) t.rotation.y += deltaTime; });
   updateHUD();
@@ -538,9 +595,11 @@ function updateHUD() {
   let angle = Math.atan2(dir.x, dir.z); // Yaw angle
   if (angle < 0) angle += Math.PI * 2;
 
-  // 300px width, tape is long. We want to map 0-2PI to a shift.
-  // The directions string is approx 24 chars.
-  const shift = (angle / (Math.PI * 2)) * 140; // Adjust multiplier for visual sync
+  // HUD tape math fix: We have 4 cardinal directions in "N · · E · · S · · W · · "
+  // 12 units total. Width is 300px.
+  // One full rotation (2PI) should shift the tape by its full length.
+  const tapeWidth = 480; // Estimated pixels for the triple-string
+  const shift = (angle / (Math.PI * 2)) * (tapeWidth / 3);
   compassTape.style.transform = `translateX(${-shift}px)`;
 }
 

@@ -6,9 +6,17 @@ export class LevelBuilder {
     this.materials = {};
     this.structures = [];
     this.levelObjects = [];
+    this.chunks = new Map(); // Key: 'x,z', Value: THREE.Group
     this.loadMaterials();
     this.noiseScale = 0.05;
     this.heightScale = 8;
+    this.chunkSize = 100;
+  }
+
+  // Simple Seedable PRNG
+  seededRandom(s) {
+    const x = Math.sin(s) * 10000;
+    return x - Math.floor(x);
   }
 
   loadMaterials() {
@@ -64,90 +72,123 @@ export class LevelBuilder {
   }
 
   clearLevel() {
-    this.levelObjects.forEach(obj => this.scene.remove(obj));
+    this.chunks.forEach(chunk => this.scene.remove(chunk));
+    this.chunks.clear();
     this.levelObjects = [];
     this.structures = [];
   }
 
-  buildJungle() {
-    this.clearLevel();
-    console.log("Building Jungle...");
+  buildChunk(cx, cz, type) {
+    const key = `${cx},${cz}`;
+    if (this.chunks.has(key)) return;
 
-    const geometry = new THREE.PlaneGeometry(200, 200, 64, 64);
+    const chunkGroup = new THREE.Group();
+    const xOffset = cx * this.chunkSize;
+    const zOffset = cz * this.chunkSize;
+
+    // Ground
+    const geometry = new THREE.PlaneGeometry(this.chunkSize, this.chunkSize, 32, 32);
     const posAttribute = geometry.attributes.position;
     for (let i = 0; i < posAttribute.count; i++) {
-      const x = posAttribute.getX(i);
-      const y = posAttribute.getY(i);
-      const h = this.getJungleHeight(x, -y);
+      const px = posAttribute.getX(i) + xOffset;
+      const pz = posAttribute.getY(i) - zOffset; // Note: PlaneGeometry Y maps to World Z
+      const h = type === 'jungle' ? this.getJungleHeight(px, -pz) : this.getCrystalHeight(px, -pz);
       posAttribute.setZ(i, h);
     }
     geometry.computeVertexNormals();
-    const ground = new THREE.Mesh(geometry, this.materials.grass);
+    const ground = new THREE.Mesh(geometry, type === 'jungle' ? this.materials.grass : this.materials.coreGround);
     ground.rotation.x = -Math.PI / 2;
+    ground.position.set(xOffset, 0, zOffset);
     ground.receiveShadow = true;
-    this.scene.add(ground);
-    this.levelObjects.push(ground);
+    chunkGroup.add(ground);
 
-    for (let i = 0; i < 200; i++) {
-      const x = (Math.random() - 0.5) * 180;
-      const z = (Math.random() - 0.5) * 180;
-      if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
-      const y = this.getJungleHeight(x, z);
-      this.createTree(x, y, z);
+    // Seed for this chunk
+    const seed = cx * 73 + cz * 37;
+
+    // Foliage/Props
+    const density = type === 'jungle' ? 50 : 20;
+    for (let i = 0; i < density; i++) {
+      const rand = this.seededRandom(seed + i);
+      const rx = (rand - 0.5) * this.chunkSize + xOffset;
+      const rz = (this.seededRandom(seed + i + 100) - 0.5) * this.chunkSize + zOffset;
+      const ry = type === 'jungle' ? this.getJungleHeight(rx, rz) : this.getCrystalHeight(rx, rz);
+
+      if (type === 'jungle') {
+        this.addTreeToChunk(chunkGroup, rx, ry, rz, seed + i);
+      } else {
+        if (rand > 0.7) this.addLightPillarToChunk(chunkGroup, rx, ry, rz, seed + i);
+        else this.addCrystalTreeToChunk(chunkGroup, rx, ry, rz, seed + i);
+      }
     }
 
-    this.createTemple(30, 30, "Sun Temple");
-    this.createTemple(-30, -30, "Moon Ruins");
-    this.createCaveEntrance(0, -40);
+    // Occasional Structures (every few chunks)
+    if (Math.abs(this.seededRandom(seed + 999)) > 0.9) {
+      const sx = xOffset;
+      const sz = zOffset;
+      const sy = type === 'jungle' ? this.getJungleHeight(sx, sz) : this.getCrystalHeight(sx, sz);
+      this.addTempleToChunk(chunkGroup, sx, sy, sz, type === 'jungle' ? "Ancient Ruin" : "Core Prism");
+      this.structures.push({ x: sx, z: sz, name: "Structure", type: 'temple' });
+    }
+
+    this.scene.add(chunkGroup);
+    this.chunks.set(key, chunkGroup);
+  }
+
+  removeChunk(cx, cz) {
+    const key = `${cx},${cz}`;
+    if (this.chunks.has(key)) {
+      this.scene.remove(this.chunks.get(key));
+      this.chunks.delete(key);
+    }
+  }
+
+  addTreeToChunk(group, x, y, z, seed) {
+    const height = 4 + this.seededRandom(seed) * 6;
+    const treeGroup = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, height, 8), this.materials.bark);
+    trunk.position.y = height / 2;
+    treeGroup.add(trunk);
+    const foliage = new THREE.Mesh(new THREE.IcosahedronGeometry(2 + this.seededRandom(seed + 1), 0), this.materials.leaves);
+    foliage.position.y = height - 1;
+    treeGroup.add(foliage);
+    treeGroup.position.set(x, y, z);
+    group.add(treeGroup);
+  }
+
+  addLightPillarToChunk(group, x, y, z, seed) {
+    const height = 10 + this.seededRandom(seed) * 20;
+    const width = 0.5 + this.seededRandom(seed + 1) * 1.5;
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(width, width, height, 6), this.materials.lightPillar);
+    pillar.position.set(x, y + height / 2, z);
+    group.add(pillar);
+  }
+
+  addCrystalTreeToChunk(group, x, y, z, seed) {
+    const height = 2 + this.seededRandom(seed) * 4;
+    const crystalGroup = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.ConeGeometry(0.5, height, 4), this.materials.crystalTree);
+    trunk.position.y = height / 2;
+    crystalGroup.add(trunk);
+    crystalGroup.position.set(x, y, z);
+    group.add(crystalGroup);
+  }
+
+  addTempleToChunk(group, x, y, z, name) {
+    const templeGroup = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.BoxGeometry(12, 1, 18), this.materials.stone);
+    templeGroup.add(base);
+    templeGroup.position.set(x, y, z);
+    group.add(templeGroup);
+  }
+
+  buildJungle() {
+    this.clearLevel();
+    console.log("Jungle Mode Initialized");
   }
 
   buildCrystalCore() {
     this.clearLevel();
-    console.log("Building Crystal Core...");
-
-    // 1. Terrain (Flatter)
-    const geometry = new THREE.PlaneGeometry(200, 200, 100, 100);
-    const posAttribute = geometry.attributes.position;
-    for (let i = 0; i < posAttribute.count; i++) {
-      const x = posAttribute.getX(i);
-      const y = posAttribute.getY(i);
-      posAttribute.setZ(i, this.getCrystalHeight(x, -y));
-    }
-    geometry.computeVertexNormals();
-    const ground = new THREE.Mesh(geometry, this.materials.coreGround);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
-    this.levelObjects.push(ground);
-
-    // 2. Light Pillars
-    for (let i = 0; i < 30; i++) {
-      const x = (Math.random() - 0.5) * 180;
-      const z = (Math.random() - 0.5) * 180;
-      const y = this.getCrystalHeight(x, z);
-      this.createLightPillar(x, y, z);
-    }
-
-    // 3. Crystal Trees
-    for (let i = 0; i < 60; i++) {
-      const x = (Math.random() - 0.5) * 190;
-      const z = (Math.random() - 0.5) * 190;
-      const y = this.getCrystalHeight(x, z);
-      this.createCrystalTree(x, y, z);
-    }
-
-    // 4. Crystal Arches (New Feature)
-    for (let i = 0; i < 15; i++) {
-      const x = (Math.random() - 0.5) * 160;
-      const z = (Math.random() - 0.5) * 160;
-      const y = this.getCrystalHeight(x, z);
-      this.createCrystalArch(x, y, z, Math.random() * Math.PI);
-    }
-
-    // 5. Structures
-    this.createTemple(0, -20, "Core Sanctum");
-    this.createTemple(-40, 40, "North Prism");
-    this.createTemple(40, -40, "South Spire");
+    console.log("Core Mode Initialized");
   }
 
   createTree(x, y, z) {
