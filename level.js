@@ -21,15 +21,46 @@ export class LevelBuilder {
 
   loadMaterials() {
     // Jungle
-    this.materials.grass = new THREE.MeshStandardMaterial({ color: 0x2d4c1e, roughness: 1.0, map: this.createNoiseTexture(0x2d4c1e, 0x1a2e12) });
+    this.materials.grass = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 1.0, map: this.createNoiseTexture(0x2d4c1e, 0x1a2e12) });
     this.materials.bark = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9, map: this.createNoiseTexture(0x3e2723, 0x281a17) });
     this.materials.leaves = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.8, side: THREE.DoubleSide });
 
-    // Crystal Core (Bright & Magical)
-    this.materials.coreGround = new THREE.MeshStandardMaterial({ color: 0xe0ffff, roughness: 0.4, metalness: 0.1, emissive: 0x004444, emissiveIntensity: 0.2 });
-    this.materials.lightPillar = new THREE.MeshPhysicalMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2.0, transparent: true, opacity: 0.8, transmission: 0.5 });
-    this.materials.crystalTree = new THREE.MeshPhysicalMaterial({ color: 0xff00ff, emissive: 0x550055, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.1 });
-    this.materials.crystalArch = new THREE.MeshPhysicalMaterial({ color: 0x0088ff, emissive: 0x002244, emissiveIntensity: 0.3, metalness: 0.9, roughness: 0.0, transmission: 0.2 });
+    // Crystal Core (Bright & Magical) - Enhanced for 4K
+    this.materials.coreGround = new THREE.MeshStandardMaterial({
+      color: 0xe0ffff,
+      roughness: 0.3,
+      metalness: 0.3,
+      emissive: 0x004444,
+      emissiveIntensity: 0.3
+    });
+    this.materials.lightPillar = new THREE.MeshPhysicalMaterial({
+      color: 0x00ffff,
+      emissive: 0x00ffff,
+      emissiveIntensity: 3.0, // Increased for bloom
+      transparent: true,
+      opacity: 0.8,
+      transmission: 0.5,
+      metalness: 0.9,
+      roughness: 0.1
+    });
+    this.materials.crystalTree = new THREE.MeshPhysicalMaterial({
+      color: 0xff00ff,
+      emissive: 0x550055,
+      emissiveIntensity: 0.8, // Increased for bloom
+      metalness: 0.9,
+      roughness: 0.05,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.1
+    });
+    this.materials.crystalArch = new THREE.MeshPhysicalMaterial({
+      color: 0x0088ff,
+      emissive: 0x002244,
+      emissiveIntensity: 0.5,
+      metalness: 0.95,
+      roughness: 0.0,
+      transmission: 0.3,
+      clearcoat: 1.0
+    });
 
     // Shared
     this.materials.stone = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, map: this.createNoiseTexture(0x888888, 0x666666) });
@@ -121,13 +152,39 @@ export class LevelBuilder {
       }
     }
 
-    // Occasional Structures (every few chunks)
-    if (Math.abs(this.seededRandom(seed + 999)) > 0.9) {
+    // Fixed structures at specific chunk coordinates for navigation
+    if (type === 'jungle' && cx === 0 && cz === 0) {
+      this.addCaveEntranceToChunk(chunkGroup, 0, this.getJungleHeight(0, -40), -40);
+    }
+
+    if (type === 'jungle') {
+      if (cx === 1 && cz === 1) this.addTempleToChunk(chunkGroup, 30, this.getJungleHeight(30, 30), 30, "Sun Temple");
+      if (cx === -1 && cz === -1) this.addTempleToChunk(chunkGroup, -30, this.getJungleHeight(-30, -30), -30, "Moon Ruins");
+    } else if (type === 'crystal_core') {
+      if (cx === 0 && cz === 0) this.addTempleToChunk(chunkGroup, 0, this.getCrystalHeight(0, -20), -20, "Core Sanctum");
+    }
+
+    // Occasional Random Structures
+    const structSeed = seed + 999;
+    if (Math.abs(this.seededRandom(structSeed)) > 0.95 && Math.abs(cx) > 1 && Math.abs(cz) > 1) {
       const sx = xOffset;
       const sz = zOffset;
       const sy = type === 'jungle' ? this.getJungleHeight(sx, sz) : this.getCrystalHeight(sx, sz);
-      this.addTempleToChunk(chunkGroup, sx, sy, sz, type === 'jungle' ? "Ancient Ruin" : "Core Prism");
-      this.structures.push({ x: sx, z: sz, name: "Structure", type: 'temple' });
+      this.addTempleToChunk(chunkGroup, sx, sy, sz, "Lost Outpost");
+    }
+
+    // Rare Treasures & Enemies
+    const entitySeed = seed + 500;
+    if (this.seededRandom(entitySeed) > 0.92) {
+      const tx = (this.seededRandom(entitySeed + 1) - 0.5) * this.chunkSize + xOffset;
+      const tz = (this.seededRandom(entitySeed + 2) - 0.5) * this.chunkSize + zOffset;
+      chunkGroup.userData.hasTreasure = { x: tx, z: tz, type: type === 'jungle' ? 'gold' : 'gem' };
+    }
+
+    if (this.seededRandom(entitySeed + 10) > 0.85) {
+      const ex = (this.seededRandom(entitySeed + 11) - 0.5) * this.chunkSize + xOffset;
+      const ez = (this.seededRandom(entitySeed + 12) - 0.5) * this.chunkSize + zOffset;
+      chunkGroup.userData.hasEnemy = { x: ex, z: ez };
     }
 
     this.scene.add(chunkGroup);
@@ -177,8 +234,37 @@ export class LevelBuilder {
     const templeGroup = new THREE.Group();
     const base = new THREE.Mesh(new THREE.BoxGeometry(12, 1, 18), this.materials.stone);
     templeGroup.add(base);
+
+    // Restoration: Columns
+    for (let cx = -5; cx <= 5; cx += 5) {
+      for (let cz = -7; cz <= 7; cz += 7) {
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 5, 8), this.materials.stone);
+        col.position.set(cx, 3, cz);
+        templeGroup.add(col);
+      }
+    }
+
+    // Restoration: Roof
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(10, 4, 4), this.materials.stone);
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = 7.5;
+    templeGroup.add(roof);
+
     templeGroup.position.set(x, y, z);
     group.add(templeGroup);
+    this.structures.push({ x, z, name, type: 'temple' });
+  }
+
+  addCaveEntranceToChunk(group, x, y, z) {
+    const caveGroup = new THREE.Group();
+    const caveGeo = new THREE.SphereGeometry(4, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+    const caveMat = new THREE.MeshStandardMaterial({ color: 0x111111, side: THREE.DoubleSide });
+    const cave = new THREE.Mesh(caveGeo, caveMat);
+    cave.scale.set(1, 0.5, 1);
+    caveGroup.add(cave);
+    caveGroup.position.set(x, y, z);
+    group.add(caveGroup);
+    this.structures.push({ x, z, name: "Core Entrance", type: 'cave' });
   }
 
   buildJungle() {

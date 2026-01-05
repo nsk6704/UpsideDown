@@ -6,6 +6,9 @@ import { AIManager } from './ai.js';
 import { AudioManager } from './audio.js';
 import { LevelBuilder } from './level.js';
 import { GLTFLoader } from "https://unpkg.com/three@0.158.0/examples/jsm/loaders/GLTFLoader.js";
+import { EffectComposer } from "https://unpkg.com/three@0.158.0/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://unpkg.com/three@0.158.0/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "https://unpkg.com/three@0.158.0/examples/jsm/postprocessing/UnrealBloomPass.js";
 
 console.log("✨ Crystal Core Adventure Loading...");
 
@@ -25,14 +28,16 @@ const gameState = {
   settingsVisible: false,
   currentLevel: 'jungle',
   weather: 'clear', // 'clear', 'rain', 'dust'
+  timeOfDay: 'day', // 'day', 'sunset', 'night'
   structures: [],
-  loadedChunks: new Set()
+  loadedChunks: new Set(),
+  enemies: []
 };
 
 /* ===================== SCENE ===================== */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
-scene.fog = new THREE.FogExp2(0x1a331a, 0.02);
+scene.fog = new THREE.FogExp2(0x1a331a, 0.01); // Reduced fog for better jungle visibility
 
 /* ===================== CAMERA ===================== */
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 150);
@@ -47,8 +52,23 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.VSMShadowMap; // Softer, more realistic shadows
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+
+/* ===================== POST-PROCESSING ===================== */
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  1.5, // strength
+  0.4, // radius
+  0.85 // threshold
+);
+composer.addPass(bloomPass);
 
 /* ===================== CONTROLS ===================== */
 const controls = new PointerLockControls(camera, document.body);
@@ -73,7 +93,7 @@ document.body.addEventListener("click", async (e) => {
 controls.addEventListener('unlock', () => {
   if (!gameState.gameWon && !gameState.mapVisible && !gameState.settingsVisible) {
     const pauseUI = document.getElementById('pause-ui');
-    if (pauseUI) pauseUI.style.display = 'block';
+    if (pauseUI) pauseUI.style.display = 'flex';
   }
 });
 
@@ -120,7 +140,7 @@ scene.add(ambientLight);
 const sunLight = new THREE.DirectionalLight(0xffffee, 1.2);
 sunLight.position.set(50, 100, 50);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.mapSize.set(4096, 4096); // Higher resolution for 4K
 scene.add(sunLight);
 
 const lantern = new THREE.PointLight(0xffaa00, 0, 30);
@@ -190,14 +210,117 @@ function updateWeather() {
   weatherParticles.position.z = camera.position.z;
 }
 
+/* ===================== TIME OF DAY SYSTEM ===================== */
+function setTimeOfDay(time) {
+  gameState.timeOfDay = time;
+
+  if (time === 'day') {
+    sunLight.color.setHex(0xffffee);
+    sunLight.intensity = gameState.currentLevel === 'jungle' ? 1.2 : 0.5;
+    sunLight.position.set(50, 100, 50);
+
+    if (gameState.currentLevel === 'jungle') {
+      scene.background = new THREE.Color(0x87CEEB);
+      scene.fog.color.setHex(0x1a331a);
+    } else {
+      scene.background = new THREE.Color(0x1a3333);
+      scene.fog.color.setHex(0x1a3333);
+    }
+  } else if (time === 'sunset') {
+    sunLight.color.setHex(0xffa500); // Orange
+    sunLight.intensity = 0.8;
+    sunLight.position.set(100, 20, 50); // Lower on horizon
+
+    if (gameState.currentLevel === 'jungle') {
+      scene.background = new THREE.Color(0xff6b35);
+      scene.fog.color.setHex(0x3d2817);
+    } else {
+      scene.background = new THREE.Color(0x2d1b2e);
+      scene.fog.color.setHex(0x2d1b2e);
+    }
+  } else if (time === 'night') {
+    sunLight.color.setHex(0x4444ff); // Moonlight
+    sunLight.intensity = 0.3;
+    sunLight.position.set(-50, 80, -50);
+
+    if (gameState.currentLevel === 'jungle') {
+      scene.background = new THREE.Color(0x0a0a1a);
+      scene.fog.color.setHex(0x0a0a1a);
+    } else {
+      scene.background = new THREE.Color(0x050510);
+      scene.fog.color.setHex(0x050510);
+    }
+
+    // Enable lantern at night
+    lantern.intensity = 2;
+  } else {
+    lantern.intensity = 0;
+  }
+}
+
 /* ===================== LEVEL SYSTEM ===================== */
 const levelBuilder = new LevelBuilder(scene);
 let treasures = [];
 
+class ShadowGuardian {
+  constructor(x, z) {
+    this.group = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6, 0), new THREE.MeshStandardMaterial({ color: 0x5500ff, emissive: 0x220055, roughness: 0.1, metalness: 0.8 }));
+    this.group.add(body);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+    eye.position.set(0, 0.2, 0.5);
+    this.group.add(eye);
+    this.group.position.set(x, 1.5, z);
+    scene.add(this.group);
+
+    this.spawnPos = new THREE.Vector3(x, 1.5, z);
+    this.velocity = new THREE.Vector3();
+    this.state = 'patrol'; // 'patrol' or 'chase'
+  }
+
+  update(deltaTime, playerPos) {
+    const distToPlayer = playerPos.distanceTo(this.group.position);
+
+    if (distToPlayer < 15) {
+      this.state = 'chase';
+    } else if (distToPlayer > 25) {
+      this.state = 'patrol';
+    }
+
+    if (this.state === 'chase') {
+      const dir = new THREE.Vector3().subVectors(playerPos, this.group.position).normalize();
+      dir.y = 0;
+      this.group.position.add(dir.multiplyScalar(deltaTime * 4));
+    } else {
+      // Idle/Patrol float
+      this.group.position.y = 1.5 + Math.sin(Date.now() * 0.002) * 0.5;
+    }
+
+    // Look at player if close
+    if (distToPlayer < 20) this.group.lookAt(playerPos.x, this.group.position.y, playerPos.z);
+
+    // Collision
+    if (distToPlayer < 1.5) {
+      showMessage("THE SHADOWS TOUCH YOU...", 0xff0000, 2000);
+      const pushBack = new THREE.Vector3().subVectors(this.group.position, playerPos).normalize();
+      controls.moveForward(-10); // Simple knockback
+      audioManager.play('reveal'); // Use reveal sound for scare
+    }
+  }
+}
+
 function loadLevel(type) {
   gameState.currentLevel = type;
+
+  // CRITICAL: Clean up all existing entities and state
   treasures.forEach(t => scene.remove(t));
   treasures = [];
+
+  gameState.enemies.forEach(e => scene.remove(e.group));
+  gameState.enemies = [];
+
+  gameState.loadedChunks.clear(); // Force chunk regeneration
+  levelBuilder.clearLevel(); // Clear all chunks and structures
 
   if (type === 'jungle') {
     scene.background = new THREE.Color(0x87CEEB);
@@ -213,12 +336,12 @@ function loadLevel(type) {
     createTreasure(-20, 20, 'gold');
 
   } else if (type === 'crystal_core') {
-    // Bright, Magical Atmosphere
-    scene.background = new THREE.Color(0xe0ffff); // Light Cyan
-    scene.fog = new THREE.FogExp2(0xe0ffff, 0.01); // Bright fog
+    // Dimmer, Magical Atmosphere
+    scene.background = new THREE.Color(0x1a3333); // Darker Teal
+    scene.fog = new THREE.FogExp2(0x1a3333, 0.02); // Recalibrated fog density
 
-    ambientLight.color.setHex(0xffffff);
-    ambientLight.intensity = 1.2; // Very bright
+    ambientLight.color.setHex(0x00ffff);
+    ambientLight.intensity = 0.8; // Brighter ambient for better visibility
 
     sunLight.intensity = 0.5; // Soft directional light
     lantern.intensity = 0; // Not needed
@@ -265,7 +388,13 @@ function updateChunks(force = false) {
         // Spawn treasure if chunk has one
         const chunk = levelBuilder.chunks.get(key);
         if (chunk.userData.hasTreasure) {
-          createTreasure(chunk.userData.hasTreasure.x, chunk.userData.hasTreasure.z, gameState.currentLevel === 'jungle' ? 'gold' : 'gem');
+          createTreasure(chunk.userData.hasTreasure.x, chunk.userData.hasTreasure.z, chunk.userData.hasTreasure.type);
+        }
+
+        // Spawn enemy if chunk has one
+        if (chunk.userData.hasEnemy) {
+          const enemy = new ShadowGuardian(chunk.userData.hasEnemy.x, chunk.userData.hasEnemy.z);
+          gameState.enemies.push(enemy);
         }
       }
     }
@@ -276,14 +405,24 @@ function updateChunks(force = false) {
     if (!newChunks.has(key)) {
       const [ux, uz] = key.split(',').map(Number);
       levelBuilder.removeChunk(ux, uz);
+      // Optional: Clean up enemies in that chunk
+      gameState.enemies = gameState.enemies.filter(e => {
+        const ex = Math.round(e.group.position.x / levelBuilder.chunkSize);
+        const ez = Math.round(e.group.position.z / levelBuilder.chunkSize);
+        if (ex === ux && ez === uz) {
+          scene.remove(e.group);
+          return false;
+        }
+        return true;
+      });
     }
   });
 
   gameState.loadedChunks = newChunks;
-  gameState.structures = levelBuilder.structures; // Refresh structures from levelBuilder
+  gameState.structures = levelBuilder.structures;
 }
 
-loadLevel('jungle');
+// REMOVE loadLevel('jungle') from here
 
 /* ===================== TREASURES ===================== */
 function createTreasure(x, z, type = 'gold') {
@@ -304,6 +443,8 @@ function createTreasure(x, z, type = 'gold') {
   group.userData.type = 'treasure';
   group.userData.collected = false;
   scene.add(group);
+
+  // Real-time map update trigger - ensuring we use accurate world pos
   treasures.push(group);
 }
 
@@ -357,8 +498,6 @@ function updateMap() {
   mapCtx.textAlign = 'center';
   mapCtx.fillText('N', 256, 35);
 
-  mapCtx.fillText('N', 256, 35);
-
   const scale = 2; // Fixed zoom scale
   const px = camera.position.x;
   const pz = camera.position.z;
@@ -367,8 +506,8 @@ function updateMap() {
     const mx = (struct.x - px) * scale + 256;
     const my = (struct.z - pz) * scale + 256;
     if (Math.hypot(mx - 256, my - 256) < 240) {
-      mapCtx.fillStyle = '#888'; mapCtx.fillRect(mx - 8, my - 8, 16, 16);
-      mapCtx.fillStyle = '#aaa'; mapCtx.fillText(struct.type === 'cave' ? "🕳️" : "🏛️", mx, my + 4);
+      mapCtx.font = '20px serif';
+      mapCtx.fillText(struct.type === 'cave' ? "🕳️" : "🏛️", mx, my);
     }
   });
 
@@ -377,8 +516,19 @@ function updateMap() {
       const mx = (t.position.x - px) * scale + 256;
       const my = (t.position.z - pz) * scale + 256;
       if (Math.hypot(mx - 256, my - 256) < 240) {
-        mapCtx.fillStyle = '#ffaa00'; mapCtx.fillRect(mx - 3, my - 3, 6, 6);
+        mapCtx.font = '16px serif';
+        mapCtx.fillText(t.userData.type === 'gold' ? '💰' : '💎', mx, my);
       }
+    }
+  });
+
+  // Draw Enemies on Map
+  gameState.enemies.forEach(e => {
+    const mx = (e.group.position.x - px) * scale + 256;
+    const my = (e.group.position.z - pz) * scale + 256;
+    if (Math.hypot(mx - 256, my - 256) < 240) {
+      mapCtx.font = '16px serif';
+      mapCtx.fillText('👾', mx, my);
     }
   });
 
@@ -416,6 +566,14 @@ settingsUI.innerHTML = `
       <option value="dust">Crystal Dust</option>
     </select>
   </div>
+  <div style="margin-bottom: 15px;">
+    <label>Time of Day:</label>
+    <select id="time-select" style="margin-left: 10px; padding: 5px;">
+      <option value="day" selected>Day</option>
+      <option value="sunset">Sunset</option>
+      <option value="night">Night</option>
+    </select>
+  </div>
   <button id="close-settings" style="padding: 5px 15px; cursor: pointer;">Close</button>
 `;
 document.body.appendChild(settingsUI);
@@ -423,7 +581,10 @@ document.body.appendChild(settingsUI);
 document.getElementById('weather-select').addEventListener('change', (e) => {
   setWeather(e.target.value);
 });
-document.getElementById('close-settings').addEventListener('click', toggleSettings);
+
+document.getElementById('time-select').addEventListener('change', (e) => {
+  setTimeOfDay(e.target.value);
+});
 
 function toggleSettings() {
   gameState.settingsVisible = !gameState.settingsVisible;
@@ -434,6 +595,8 @@ function toggleSettings() {
     controls.lock();
   }
 }
+
+document.getElementById('close-settings').addEventListener('click', toggleSettings);
 
 /* ===================== GAME LOOP ===================== */
 function update() {
@@ -470,6 +633,8 @@ function update() {
     treasures.forEach(t => {
       if (!t.userData.collected && playerPos.distanceTo(t.position) < 3) collectTreasure(t);
     });
+
+    gameState.enemies.forEach(e => e.update(deltaTime, playerPos));
 
     // Footsteps
     if (move.f || move.b || move.l || move.r) {
@@ -612,6 +777,17 @@ function showMessage(text, color = 0xffffff, duration = 3000) {
   setTimeout(() => { messageEl.style.opacity = '0'; setTimeout(() => messageEl.remove(), 1000); }, duration);
 }
 
-renderer.setAnimationLoop(() => { update(); renderer.render(scene, camera); });
-window.addEventListener("resize", () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+// Initial Level Load & Start Loop
+renderer.setAnimationLoop(() => {
+  update();
+  composer.render(); // Use composer instead of direct renderer
+});
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight); // Update composer size
+});
+
 updateHUD();
+loadLevel('jungle');
