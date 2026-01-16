@@ -11,7 +11,8 @@ export class AudioManager {
       'crystal_ambience': 'assets/sounds/crystal_ambience.mp3',
       'collect': 'assets/sounds/collect.mp3',
       'footstep': 'assets/sounds/footstep.mp3',
-      'reveal': 'assets/sounds/reveal.mp3'
+      'reveal': 'assets/sounds/reveal.mp3',
+      'win': 'assets/sounds/win.mp3'
     };
     this.chirpTimeout = null;
   }

@@ -31,7 +31,13 @@ const gameState = {
   timeOfDay: 'day', // 'day', 'sunset', 'night'
   structures: [],
   loadedChunks: new Set(),
-  enemies: []
+  enemies: [],
+  stats: {
+    startTime: 0,
+    timeJungle: 0,
+    timeCrystal: 0,
+    monstersEncountered: 0
+  }
 };
 
 /* ===================== SCENE ===================== */
@@ -279,11 +285,18 @@ class ShadowGuardian {
     this.spawnPos = new THREE.Vector3(x, 1.5, z);
     this.velocity = new THREE.Vector3();
     this.state = 'patrol';
+    this.encountered = false;
   }
 
   update(deltaTime, playerPos) {
     const distToPlayer = playerPos.distanceTo(this.group.position);
-    if (distToPlayer < 15) this.state = 'chase';
+    if (distToPlayer < 15) {
+      this.state = 'chase';
+      if (!this.encountered) {
+        this.encountered = true;
+        gameState.stats.monstersEncountered++;
+      }
+    }
     else if (distToPlayer > 25) this.state = 'patrol';
 
     if (this.state === 'chase') {
@@ -646,6 +659,10 @@ function update() {
     } else {
       footstepTimer = 0;
     }
+
+    // Update Stats
+    if (gameState.currentLevel === 'jungle') gameState.stats.timeJungle += deltaTime;
+    else gameState.stats.timeCrystal += deltaTime;
   }
 
   updateNPC(deltaTime);
@@ -667,9 +684,103 @@ async function collectTreasure(t) {
 }
 
 async function winGame() {
-  gameState.gameWon = true; controls.unlock();
-  showMessage("YOU ARE THE MASTER EXPLORER!", 0x00ff00, 8000);
+  gameState.gameWon = true;
   gameState.playing = false;
+  controls.unlock();
+
+  audioManager.stopAmbience();
+  audioManager.play('win');
+  createConfetti();
+
+  const totalTime = ((Date.now() - gameState.startTime) / 1000).toFixed(1);
+  const jungleTime = gameState.stats.timeJungle.toFixed(1);
+  const crystalTime = gameState.stats.timeCrystal.toFixed(1);
+
+  const analysisUI = document.createElement('div');
+  analysisUI.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; color: white;
+    font-family: 'Courier New', monospace; z-index: 3000;
+    animation: fadeIn 1s ease-out;
+  `;
+
+  analysisUI.innerHTML = `
+    <h1 style="color: #ffd700; text-shadow: 0 0 20px #ffd700; font-size: 48px; margin-bottom: 30px;">MISSION ACCOMPLISHED</h1>
+    <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 15px; border: 1px solid #444; width: 500px;">
+      <h2 style="border-bottom: 2px solid #555; padding-bottom: 10px; margin-top: 0;">Exploration Analysis</h2>
+      
+      <div style="display: flex; justify-content: space-between; margin: 15px 0; font-size: 18px;">
+        <span>⏱️ Total Duration:</span>
+        <span style="color: #00ffff">${totalTime}s</span>
+      </div>
+      
+      <div style="display: flex; justify-content: space-between; margin: 15px 0; font-size: 18px;">
+        <span>🌴 Jungle Time:</span>
+        <span style="color: #4caf50">${jungleTime}s</span>
+      </div>
+      
+      <div style="display: flex; justify-content: space-between; margin: 15px 0; font-size: 18px;">
+        <span>💎 Crystal Core Time:</span>
+        <span style="color: #d633ff">${crystalTime}s</span>
+      </div>
+      
+      <div style="display: flex; justify-content: space-between; margin: 15px 0; font-size: 18px;">
+        <span>👾 Monsters Encountered:</span>
+        <span style="color: #ff4444">${gameState.stats.monstersEncountered}</span>
+      </div>
+      
+      <div style="display: flex; justify-content: space-between; margin: 15px 0; font-size: 18px;">
+        <span>🏆 Artifacts Recovered:</span>
+        <span style="color: #ffd700">5/5</span>
+      </div>
+
+    </div>
+    
+    <div style="margin-top: 40px; display: flex; gap: 20px;">
+      <button id="restart-btn" style="padding: 15px 40px; font-size: 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer; transition: transform 0.2s;">↻ RESTART MISSION</button>
+      <button id="exit-btn" style="padding: 15px 40px; font-size: 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer; transition: transform 0.2s;">⚠ EXIT SIMULATION</button>
+    </div>
+  `;
+
+  document.body.appendChild(analysisUI);
+
+  document.getElementById('restart-btn').onclick = () => location.reload();
+  document.getElementById('exit-btn').onclick = () => {
+    analysisUI.innerHTML = `<h1 style="color: white;">SIMULATION TERMINATED.</h1><p>Thank you for playing.</p>`;
+    // Optional: Stop rendering to save resources
+    renderer.setAnimationLoop(null);
+  };
+}
+
+function createConfetti() {
+  const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+  for (let i = 0; i < 200; i++) {
+    const confetti = document.createElement('div');
+    confetti.style.cssText = `
+      position: fixed;
+      width: ${Math.random() * 10 + 5}px;
+      height: ${Math.random() * 10 + 5}px;
+      background: ${colors[Math.floor(Math.random() * colors.length)]};
+      left: ${Math.random() * 100}vw;
+      top: -10vh;
+      opacity: ${Math.random()};
+      transform: rotate(${Math.random() * 360}deg);
+      transition: top ${Math.random() * 3 + 2}s linear, transform ${Math.random() * 3 + 2}s linear;
+      z-index: 2999;
+      pointer-events: none;
+    `;
+    document.body.appendChild(confetti);
+
+    // Animate
+    setTimeout(() => {
+      confetti.style.top = '110vh';
+      confetti.style.transform = `rotate(${Math.random() * 360 + 360}deg)`;
+    }, 100);
+
+    // Clean up
+    setTimeout(() => confetti.remove(), 5000);
+  }
 }
 
 // Pause UI
