@@ -331,6 +331,7 @@ function loadLevel(type) {
 
     levelBuilder.buildJungle();
     setWeather('rain'); // Default jungle weather
+    audioManager.startJungleAmbience();
 
     createTreasure(10, 10, 'gold');
     createTreasure(-20, 20, 'gold');
@@ -348,6 +349,7 @@ function loadLevel(type) {
 
     levelBuilder.buildCrystalCore();
     setWeather('dust'); // Crystal dust
+    audioManager.startCrystalAmbience();
 
     createTreasure(0, -20, 'gem');
     createTreasure(-40, 40, 'gem');
@@ -555,7 +557,7 @@ document.body.appendChild(settingsBtn);
 
 const settingsUI = document.createElement('div');
 settingsUI.id = 'settings-ui';
-settingsUI.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 300px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; color: white; display: none; z-index: 2001; font-family: sans-serif;`;
+settingsUI.style.cssText = `position: fixed; top: 80%; left: 50%; transform: translate(-50%, -50%); width: 300px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; color: white; display: none; z-index: 2001; font-family: sans-serif;`;
 settingsUI.innerHTML = `
   <h2 style="margin-top:0">Settings</h2>
   <div style="margin-bottom: 15px;">

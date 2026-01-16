@@ -8,10 +8,12 @@ export class AudioManager {
     this.sounds = {}; // Stores loaded audio buffers
     this.soundPaths = {
       'jungle_ambience': 'assets/sounds/jungle_ambience.mp3',
+      'crystal_ambience': 'assets/sounds/crystal_ambience.mp3',
       'collect': 'assets/sounds/collect.mp3',
       'footstep': 'assets/sounds/footstep.mp3',
       'reveal': 'assets/sounds/reveal.mp3'
     };
+    this.chirpTimeout = null;
   }
 
   async init() {
@@ -55,8 +57,23 @@ export class AudioManager {
     }
   }
 
+  stopAmbience() {
+    if (this.chirpTimeout) {
+      clearTimeout(this.chirpTimeout);
+      this.chirpTimeout = null;
+    }
+    this.ambientNodes.forEach(node => {
+      try {
+        node.stop();
+        node.disconnect();
+      } catch (e) { /* ignore */ }
+    });
+    this.ambientNodes = [];
+  }
+
   startJungleAmbience() {
     if (!this.initialized) return;
+    this.stopAmbience();
 
     if (this.sounds['jungle_ambience']) {
       // Play custom loop
@@ -77,7 +94,62 @@ export class AudioManager {
     }
   }
 
-  // ... Procedural generators (PinkNoise, InsectDrone, BirdChirp) kept as fallback ...
+
+
+  startCrystalAmbience() {
+    if (!this.initialized) return;
+    this.stopAmbience();
+
+    if (this.sounds['crystal_ambience']) {
+      const source = this.context.createBufferSource();
+      source.buffer = this.sounds['crystal_ambience'];
+      source.loop = true;
+      const gain = this.context.createGain();
+      gain.gain.value = 0.4;
+      source.connect(gain);
+      gain.connect(this.context.destination);
+      source.start();
+      this.ambientNodes.push(source);
+    } else {
+      // Crystal Procedural: Low drone + glassy resonance
+      this.createCrystalDrone();
+    }
+  }
+
+  createCrystalDrone() {
+    // Low frequency drone
+    const osc = this.context.createOscillator();
+    const gain = this.context.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 55; // Low A
+    gain.gain.value = 0.15;
+    osc.connect(gain);
+    gain.connect(this.context.destination);
+    osc.start();
+    this.ambientNodes.push(osc);
+
+    // "Glassy" fluctuating tone
+    const glassOsc = this.context.createOscillator();
+    const glassGain = this.context.createGain();
+    glassOsc.type = 'triangle';
+    glassOsc.frequency.value = 880;
+
+    // LFO for the glass sound
+    const lfo = this.context.createOscillator();
+    lfo.frequency.value = 0.2; // Slow modulation
+    const lfoGain = this.context.createGain();
+    lfoGain.gain.value = 20;
+    lfo.connect(lfoGain);
+    lfoGain.connect(glassOsc.frequency);
+
+    glassGain.gain.value = 0.05;
+    glassOsc.connect(glassGain);
+    glassGain.connect(this.context.destination);
+
+    glassOsc.start();
+    lfo.start();
+    this.ambientNodes.push(glassOsc, lfo);
+  }
   createPinkNoise(volume) {
     const bufferSize = 4096;
     const pinkNoise = (function () {
@@ -137,7 +209,7 @@ export class AudioManager {
   scheduleBirdChirp() {
     if (!this.initialized) return;
     const delay = 2000 + Math.random() * 5000;
-    setTimeout(() => {
+    this.chirpTimeout = setTimeout(() => {
       this.playBirdChirp();
       this.scheduleBirdChirp();
     }, delay);
